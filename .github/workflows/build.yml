@@ -5,6 +5,9 @@ on:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: macos-latest
@@ -42,6 +45,18 @@ jobs:
           cp -R build/Build/Products/Release-iphoneos/NarouReader.app Payload/
           zip -qr NarouReader.ipa Payload
 
+      - name: Report compile errors as annotations
+        if: always()
+        run: |
+          if [ -f build.log ]; then
+            grep -E "\.swift:[0-9]+:[0-9]+: error:" build.log | sort -u | head -40 | while IFS= read -r line; do
+              file=$(echo "$line" | sed -E 's/^(.*\.swift):([0-9]+):([0-9]+): error: (.*)$/\1/' | sed "s#^$PWD/##")
+              ln=$(echo "$line" | sed -E 's/^(.*\.swift):([0-9]+):([0-9]+): error: (.*)$/\2/')
+              msg=$(echo "$line" | sed -E 's/^(.*\.swift):([0-9]+):([0-9]+): error: (.*)$/\4/')
+              echo "::error file=$file,line=$ln::$msg"
+            done
+          fi
+
       - name: Upload build log
         if: always()
         uses: actions/upload-artifact@v4
@@ -54,3 +69,13 @@ jobs:
         with:
           name: NarouReader-ipa
           path: NarouReader.ipa
+
+      - name: Publish IPA as a release (public download link)
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete latest --yes --cleanup-tag || true
+          gh release create latest NarouReader.ipa \
+            --title "最新ビルド (iPhone 用 IPA)" \
+            --notes "Sideloadly で iPhone に入れるためのファイルです。署名なしのため、そのままでは入りません。"
