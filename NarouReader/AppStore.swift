@@ -1,5 +1,12 @@
 import SwiftUI
 
+/// 同期のための「更新時刻」(ミリ秒)。作品ごと・設定まとめて
+struct SyncTimes: Codable {
+    var f: [String: Double] = [:]   // お気に入り(作品ごと)
+    var p: [String: Double] = [:]   // 既読・読んだ位置(作品ごと)
+    var s: Double = 0               // 表示設定
+}
+
 /// この iPhone の中に保存するデータ(お気に入り・既読・読んだ位置・設定)
 struct PersistedState: Codable {
     var favs: [String: FavoriteNovel] = [:]
@@ -14,13 +21,57 @@ struct PersistedState: Codable {
     var theme: String = "system"               // system / light / dark
     var autoNext: Bool = true
     var hideControls: Bool = false
+    // アカウント・同期
+    var tm: SyncTimes = SyncTimes()
+    var serverURL: String = ""
+    var acctEmail: String? = nil
+    var acctToken: String? = nil
+    var lastSync: Double? = nil
+
+    init() {}
+
+    enum CodingKeys: String, CodingKey {
+        case favs, read, pos, last, recent, speed, voiceID, fontSize, lineSpacing, theme, autoNext, hideControls
+        case tm, serverURL, acctEmail, acctToken, lastSync
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        favs = try c.decodeIfPresent([String: FavoriteNovel].self, forKey: .favs) ?? [:]
+        read = try c.decodeIfPresent([String: [Int]].self, forKey: .read) ?? [:]
+        pos = try c.decodeIfPresent([String: [String: Int]].self, forKey: .pos) ?? [:]
+        last = try c.decodeIfPresent([String: Int].self, forKey: .last) ?? [:]
+        recent = try c.decodeIfPresent([RecentNovel].self, forKey: .recent) ?? []
+        speed = try c.decodeIfPresent(Double.self, forKey: .speed) ?? 1.2
+        voiceID = try c.decodeIfPresent(String.self, forKey: .voiceID) ?? ""
+        fontSize = try c.decodeIfPresent(Double.self, forKey: .fontSize) ?? 18
+        lineSpacing = try c.decodeIfPresent(Double.self, forKey: .lineSpacing) ?? 8
+        theme = try c.decodeIfPresent(String.self, forKey: .theme) ?? "system"
+        autoNext = try c.decodeIfPresent(Bool.self, forKey: .autoNext) ?? true
+        hideControls = try c.decodeIfPresent(Bool.self, forKey: .hideControls) ?? false
+        tm = try c.decodeIfPresent(SyncTimes.self, forKey: .tm) ?? SyncTimes()
+        serverURL = try c.decodeIfPresent(String.self, forKey: .serverURL) ?? ""
+        acctEmail = try c.decodeIfPresent(String.self, forKey: .acctEmail)
+        acctToken = try c.decodeIfPresent(String.self, forKey: .acctToken)
+        lastSync = try c.decodeIfPresent(Double.self, forKey: .lastSync)
+    }
 }
 
 @MainActor
 final class AppStore: ObservableObject {
     @Published var s: PersistedState {
-        didSet { save() }
+        didSet {
+            if !applyingRemote { trackChanges(old: oldValue) }
+            save()
+            if !applyingRemote { scheduleSync() }
+        }
     }
+    // 同期の状態
+    @Published var syncMessage: String = ""
+    @Published var syncing: Bool = false
+    var applyingRemote = false
+    var syncDirty = false
+    var syncTask: Task<Void, Never>? = nil
     private let key = "narou-native-v1"
     let speaker = Speaker()   // 読み上げエンジンは、アプリ全体で1つだけ
 
@@ -112,7 +163,7 @@ final class AppStore: ObservableObject {
             s.favs[ncode] = f
         }
         var list = s.recent.filter { $0.ncode != ncode }
-        list.insert(RecentNovel(ncode: ncode, title: title, total: total), at: 0)
+        list.insert(RecentNovel(ncode: ncode, title: title, total: total, t: Date().timeIntervalSince1970 * 1000), at: 0)
         s.recent = Array(list.prefix(30))
     }
 

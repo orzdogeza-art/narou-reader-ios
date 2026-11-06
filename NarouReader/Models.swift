@@ -34,6 +34,7 @@ struct RecentNovel: Codable, Identifiable, Hashable {
     let ncode: String
     var title: String
     var total: Int
+    var t: Double? = nil   // 最後に開いた時刻(同期用・ミリ秒)
     var id: String { ncode }
 }
 

@@ -5,11 +5,26 @@ import AVFoundation
 struct SettingsForm: View {
     @EnvironmentObject var store: AppStore
     var onSpeechSettingChanged: () -> Void = {}
+    var showAccount: Bool = false
 
     private var voices: [AVSpeechSynthesisVoice] { Speaker.japaneseVoices() }
 
     var body: some View {
         Form {
+            if showAccount {
+                Section("アカウント") {
+                    NavigationLink {
+                        AccountView()
+                    } label: {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(store.loggedIn ? (store.s.acctEmail ?? "") : "ログイン / 新規登録")
+                            Text(store.loggedIn ? "複数の端末で履歴を共有中" : "複数の端末で履歴を共有できます")
+                                .font(.footnote)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                }
+            }
             Section("読み上げ") {
                 VStack(alignment: .leading) {
                     Text("速度 \(String(format: "%.1f", store.s.speed))x")
@@ -51,7 +66,7 @@ struct SettingsForm: View {
 struct SettingsView: View {
     var body: some View {
         NavigationStack {
-            SettingsForm()
+            SettingsForm(showAccount: true)
                 .navigationTitle("設定")
         }
     }
